@@ -21,8 +21,8 @@ This project is an interactive, multi-user Claude chatbot built using **Gradio**
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/claude-chatbot-app.git
-cd claude-chatbot-app
+https://github.com/kishormaity/google-drive-semantic-search.git
+cd google-drive-semantic-search
 ```
 
 ### 2. Install dependencies
