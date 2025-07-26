@@ -1,0 +1,60 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+env/
+venv/
+ENV/
+*.env
+*.venv
+
+# Environment variables
+.env
+
+# Credentials and secrets
+credentials.json
+.credential.json
+*.key
+*.pem
+
+# VSCode / PyCharm / IDE settings
+.vscode/
+.idea/
+
+# macOS and Linux system files
+.DS_Store
+
+# Logs and cache
+*.log
+*.cache
+*.pid
+
+# Python egg
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Gradio cache
+gradio_cached_examples/
+
+# FAISS vector DB or temporary files
+*.faiss
+*.pkl
+*.db
+index_store/
+
+# Runtime storage
+user_data/
+tokens/
+
+# My own notes or test files
+*.bak
+*.old
+test_*.py
