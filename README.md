@@ -116,4 +116,4 @@ MIT License. Free to use, modify, and distribute.
 
 ## Author
 
-Built by [Kishor](https://github.com/yourusername). Contributions welcome!
+Built by [Kishor](https://github.com/kishormaity). Contributions welcome!
