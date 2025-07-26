@@ -82,7 +82,7 @@ def build_faiss_index(documents, embeddings, index_dir):
     print(f"✅ FAISS index saved at: {index_dir}")
     return vectorstore
 
-def query_llm(vectorstore, query):
+def query_llm(vectorstore, query, evaluate_response=True):
     print(f"\n💬 New query received: {query}")
     retriever = vectorstore.as_retriever(search_type="similarity", k=4)
     llm = ChatAnthropic(
@@ -103,7 +103,28 @@ def query_llm(vectorstore, query):
             f"🔗 {doc.metadata.get('source') or doc.metadata.get('file_path') or doc.metadata.get('title') or 'Unknown'}"
             for doc in result['source_documents']
         )
-        return f"📌 **Answer**:\n{result['result']}\n\n📎 **Sources**:\n{sources}"
+        
+        response = f"📌 **Answer**:\n{result['result']}\n\n📎 **Sources**:\n{sources}"
+        
+        # Add evaluation if requested
+        if evaluate_response:
+            try:
+                from evaluator import evaluate_qa_response
+                evaluation = evaluate_qa_response(query, result['result'])
+                
+                eval_info = f"\n\n📊 **Response Quality**:\n"
+                eval_info += f"• Relevance: {evaluation.get('relevance_score', 'N/A')}/5\n"
+                eval_info += f"• Completeness: {evaluation.get('completeness_score', 'N/A')}/5\n"
+                eval_info += f"• Overall Score: {evaluation.get('overall_score', 'N/A')}/5"
+                
+                response += eval_info
+                print(f"✅ Response evaluated - Score: {evaluation.get('overall_score', 'N/A')}")
+                
+            except Exception as e:
+                print(f"❌ Evaluation failed: {e}")
+                response += "\n\n❌ Evaluation failed"
+        
+        return response
     except Exception as e:
         print(f"❌ Claude query failed: {e}")
         return f"❌ Error: {str(e)}"
