@@ -30,153 +30,138 @@ default_config = {
 }
 
 def authenticate_drive(user_id="default"):
-    print(f"🔐 Authenticating Google Drive for user: {user_id}")
+    """Authenticate with Google Drive API."""
     SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-    token_file = f"tokens/token_{user_id}.json"
-    creds = None
-
-    if os.path.exists(token_file):
+    token_path = f"tokens/{user_id}_token.json"
+    
+    if os.path.exists(token_path):
         try:
-            creds = Credentials.from_authorized_user_file(token_file, SCOPES)
-            print("✅ Found existing token.")
+            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+            if creds and not creds.expired:
+                print("Found existing token.")
+                return creds
+            else:
+                print("Token corrupted. Reauthenticating...")
         except Exception:
-            print("⚠️ Token corrupted. Reauthenticating...")
-            os.remove(token_file)
-            return authenticate_drive(user_id)
-
-    if not creds or not creds.valid:
-        print("🔄 No valid token. Starting authentication flow...")
-        flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
-        creds = flow.run_local_server(port=0)
-        os.makedirs("tokens", exist_ok=True)
-        with open(token_file, "w") as f:
-            f.write(creds.to_json())
-        print("✅ New token stored.")
-
+            print("Token corrupted. Reauthenticating...")
+    
+    print("No valid token. Starting authentication flow...")
+    flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+    creds = flow.run_local_server(port=0)
+    
+    # Save the credentials for the next run
+    os.makedirs("tokens", exist_ok=True)
+    with open(token_path, 'w') as token:
+        token.write(creds.to_json())
+    print("New token stored.")
+    
     return creds
 
 def list_drive_files(user_id="default"):
-    """
-    List all files in Google Drive for debugging purposes.
-    """
-    print(f"🔍 Listing all files in Google Drive for user: {user_id}")
-    creds = authenticate_drive(user_id)
+    """List all files in Google Drive for the user."""
+    print(f"Listing all files in Google Drive for user: {user_id}")
     
     try:
+        creds = authenticate_drive(user_id)
         service = build('drive', 'v3', credentials=creds)
         
         # Get all files from all accessible locations
-        results = service.files().list(
-            pageSize=1000,
-            fields="nextPageToken, files(id, name, mimeType, size, parents, createdTime, modifiedTime, driveId, shared)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-            corpora='allDrives'  # Include all drives user has access to
-        ).execute()
+        all_files = []
         
-        files = results.get('files', [])
+        # 1. Personal Drive files
+        try:
+            personal_files = service.files().list(
+                pageSize=1000,
+                fields="nextPageToken, files(id, name, mimeType, parents, size, modifiedTime, webViewLink)"
+            ).execute()
+            all_files.extend(personal_files.get('files', []))
+        except Exception as e:
+            print(f"Error accessing personal drive: {e}")
         
-        if not files:
-            print("❌ No files found in any accessible Google Drive location")
+        # 2. Shared Drive files
+        try:
+            shared_drives = service.drives().list(pageSize=100).execute()
+            for drive in shared_drives.get('drives', []):
+                try:
+                    drive_files = service.files().list(
+                        pageSize=1000,
+                        corpora='drive',
+                        driveId=drive['id'],
+                        includeItemsFromAllDrives=True,
+                        supportsAllDrives=True,
+                        fields="nextPageToken, files(id, name, mimeType, parents, size, modifiedTime, webViewLink)"
+                    ).execute()
+                    all_files.extend(drive_files.get('files', []))
+                except Exception as e:
+                    print(f"Error accessing shared drive {drive['name']}: {e}")
+        except Exception as e:
+            print(f"Error listing shared drives: {e}")
+        
+        if not all_files:
+            print("No files found in any accessible Google Drive location")
             return []
         
-        print(f"📁 Found {len(files)} total files in all accessible Google Drive locations:")
+        # Filter for supported file types
+        supported_types = [
+            'application/vnd.google-apps.document',
+            'application/vnd.google-apps.spreadsheet',
+            'application/pdf',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        ]
         
-        # Group files by type and source
-        file_types = {}
-        file_sources = {}
-        supported_types = ['pdf', 'docx', 'txt', 'md', 'csv', 'xlsx', 'pptx']
-        supported_files = []
+        supported_files = [f for f in all_files if f.get('mimeType') in supported_types]
         
-        for file in files:
-            mime_type = file.get('mimeType', '')
-            file_name = file.get('name', 'Unknown')
-            file_size = file.get('size', '0')
-            file_id = file.get('id', '')
-            drive_id = file.get('driveId', '')
-            is_shared = file.get('shared', False)
-            
-            # Determine file type
-            file_type = 'unknown'
-            if 'pdf' in mime_type:
-                file_type = 'pdf'
-            elif 'word' in mime_type:
-                file_type = 'docx'
-            elif 'text' in mime_type:
-                file_type = 'txt'
-            elif 'spreadsheet' in mime_type:
-                file_type = 'xlsx'
-            elif 'presentation' in mime_type:
-                file_type = 'pptx'
-            elif 'csv' in mime_type:
-                file_type = 'csv'
-            
-            # Determine source
-            if drive_id:
-                source = f"Shared Drive ({drive_id})"
-            elif is_shared:
-                source = "Shared Folder"
-            else:
-                source = "Personal Drive"
-            
-            if file_type not in file_types:
-                file_types[file_type] = []
-            
-            if source not in file_sources:
-                file_sources[source] = []
-            
-            file_info = {
-                'name': file_name,
-                'id': file_id,
-                'size': file_size,
-                'mime_type': mime_type,
-                'source': source
-            }
-            
-            file_types[file_type].append(file_info)
-            file_sources[source].append(file_info)
-            
-            if file_type in supported_types:
-                supported_files.append(file_info)
+        # Group files by type
+        files_by_type = {}
+        for file in supported_files:
+            mime_type = file.get('mimeType', 'unknown')
+            if mime_type not in files_by_type:
+                files_by_type[mime_type] = []
+            files_by_type[mime_type].append(file)
         
         # Print summary by file type
-        print("\n📊 File Summary by Type:")
-        for file_type, files in file_types.items():
-            print(f"  • {file_type.upper()}: {len(files)} files")
-            for file_info in files[:3]:  # Show first 3 files
-                print(f"    - {file_info['name']} ({file_info['size']} bytes) - {file_info['source']}")
+        print("\nFile Summary by Type:")
+        for mime_type, files in files_by_type.items():
+            type_name = mime_type.split('.')[-1].upper()
+            print(f"  {type_name}: {len(files)} files")
+            for file in files[:3]:  # Show first 3 files of each type
+                print(f"    - {file.get('name', 'Unknown')}")
             if len(files) > 3:
                 print(f"    ... and {len(files) - 3} more")
         
-        # Print summary by source
-        print("\n📂 File Summary by Source:")
-        for source, files in file_sources.items():
-            print(f"  • {source}: {len(files)} files")
-            for file_info in files[:3]:  # Show first 3 files from each source
-                print(f"    - {file_info['name']} ({file_info['size']} bytes)")
-            if len(files) > 3:
-                print(f"    ... and {len(files) - 3} more")
+        # Group files by source (personal vs shared drives)
+        personal_files = [f for f in supported_files if not f.get('parents') or 'drive' not in f.get('parents', [''])[0]]
+        shared_files = [f for f in supported_files if f not in personal_files]
         
-        print(f"\n✅ Supported files for loading: {len(supported_files)}")
+        print("\nFile Summary by Source:")
+        print(f"  Personal Drive: {len(personal_files)} files")
+        print(f"  Shared Drives: {len(shared_files)} files")
+        
+        print(f"\nSupported files for loading: {len(supported_files)}")
+        
         if supported_files:
-            print("📋 Supported files:")
-            for file_info in supported_files:
-                print(f"  • {file_info['name']} ({file_info['mime_type']}) - {file_info['source']}")
+            print("Supported files:")
+            for file in supported_files[:10]:  # Show first 10 files
+                print(f"  - {file.get('name', 'Unknown')} ({file.get('mimeType', 'unknown')})")
+            if len(supported_files) > 10:
+                print(f"  ... and {len(supported_files) - 10} more")
         
         return supported_files
         
     except HttpError as error:
-        print(f"❌ Google Drive API error: {error}")
+        print(f"Google Drive API error: {error}")
         return []
     except Exception as e:
-        print(f"❌ Error listing files: {e}")
+        print(f"Error listing files: {e}")
         return []
 
 def test_comprehensive_loading(user_id="default"):
     """
     Test comprehensive loading to ensure all files are captured.
     """
-    print(f"🧪 Testing comprehensive loading for user: {user_id}")
+    print(f"Testing comprehensive loading for user: {user_id}")
     creds = authenticate_drive(user_id)
     
     # Test different configurations
@@ -209,14 +194,14 @@ def test_comprehensive_loading(user_id="default"):
     
     for config in configs:
         try:
-            print(f"\n🔧 Testing {config['name']}...")
+            print(f"\nTesting {config['name']}...")
             loader = GoogleDriveLoader(
                 credentials=creds,
                 **config['config']
             )
             
             docs = loader.load()
-            print(f"📄 {config['name']} loaded {len(docs)} documents")
+            print(f"Loaded {len(docs)} documents")
             
             # Add to all docs
             for doc in docs:
@@ -225,7 +210,7 @@ def test_comprehensive_loading(user_id="default"):
                 all_docs.append(doc)
                 
         except Exception as e:
-            print(f"❌ {config['name']} failed: {e}")
+            print(f"Failed: {config['name']} - {e}")
     
     # Remove duplicates
     seen_contents = set()
@@ -236,18 +221,18 @@ def test_comprehensive_loading(user_id="default"):
             seen_contents.add(content_hash)
             unique_docs.append(doc)
     
-    print(f"\n📊 Comprehensive loading results:")
-    print(f"  • Total documents found: {len(unique_docs)}")
-    print(f"  • Duplicates removed: {len(all_docs) - len(unique_docs)}")
+    print(f"\nComprehensive loading results:")
+    print(f"  Total documents found: {len(unique_docs)}")
+    print(f"  Duplicates removed: {len(all_docs) - len(unique_docs)}")
     
     return unique_docs
 
 def load_documents(user_id="default"):
-    print(f"📁 Loading Google Drive documents for user: {user_id}")
+    print(f"Loading Google Drive documents for user: {user_id}")
     creds = authenticate_drive(user_id)
     
     # First, let's see what files are available
-    print("🔍 Checking available files first...")
+    print("Checking available files first...")
     available_files = list_drive_files(user_id)
     
     # Enhanced Google Drive loader to collect from ALL accessible locations
@@ -262,7 +247,7 @@ def load_documents(user_id="default"):
     )
     
     try:
-        print("🔄 Scanning ALL accessible Google Drive locations...")
+        print("Scanning ALL accessible Google Drive locations...")
         print("   - Personal Drive")
         print("   - Shared Drives")
         print("   - Shared Folders")
@@ -270,7 +255,7 @@ def load_documents(user_id="default"):
 
         docs = loader.load()
         # Detailed logging of what was found
-        print(f"📄 Total documents loaded: {len(docs)}")
+        print(f"Total documents loaded: {len(docs)}")
         if docs:
             # Group documents by type and source
             doc_types = {}
@@ -314,71 +299,71 @@ def load_documents(user_id="default"):
                 doc_sources[file_source].append(file_name)
                 total_size += file_size
             # Print summary by file type
-            print("\n📊 Document Summary by Type:")
+            print("\nDocument Summary by Type:")
             for doc_type, files in doc_types.items():
-                print(f"  • {doc_type.upper()}: {len(files)} files")
+                print(f"  {doc_type.upper()}: {len(files)} files")
                 for file_name in files[:3]:  # Show first 3 files of each type
                     print(f"    - {file_name}")
                 if len(files) > 3:
                     print(f"    ... and {len(files) - 3} more")
             # Print summary by source
-            print("\n📂 Document Summary by Source:")
+            print("\nDocument Summary by Source:")
             for source, files in doc_sources.items():
-                print(f"  • {source}: {len(files)} files")
+                print(f"  {source}: {len(files)} files")
                 for file_name in files[:3]:  # Show first 3 files from each source
                     print(f"    - {file_name}")
                 if len(files) > 3:
                     print(f"    ... and {len(files) - 3} more")
-            print(f"\n📏 Total content size: {total_size:,} characters")
+            print(f"\nTotal content size: {total_size:,} characters")
             # Compare with available files
             if available_files:
-                print(f"\n📋 Comparison with available files:")
-                print(f"  • Available supported files: {len(available_files)}")
-                print(f"  • Actually loaded: {len(loaded_files)}")
+                print(f"\nComparison with available files:")
+                print(f"  Available supported files: {len(available_files)}")
+                print(f"  Actually loaded: {len(loaded_files)}")
                 
                 if len(loaded_files) < len(available_files):
-                    print(f"  ⚠️  {len(available_files) - len(loaded_files)} files were not loaded!")
-                    print("  🔍 Possible reasons:")
-                    print("     - Files are too large")
-                    print("     - Files are corrupted")
-                    print("     - Permission issues")
-                    print("     - API rate limiting")
+                    print(f"  {len(available_files) - len(loaded_files)} files were not loaded!")
+                    print("  Troubleshooting suggestions:")
+                    print("    - Files are too large")
+                    print("    - Files are corrupted")
+                    print("    - Permission issues")
+                    print("    - API rate limiting")
                     
                     # Show which files were not loaded
                     loaded_names = [f['name'] for f in loaded_files]
                     missing_files = [f for f in available_files if f['name'] not in loaded_names]
                     if missing_files:
-                        print("  📝 Missing files:")
+                        print("  Missing files:")
                         for file_info in missing_files[:5]:  # Show first 5 missing files
-                            print(f"     - {file_info['name']} ({file_info['mime_type']}) - {file_info['source']}")
+                            print(f"    - {file_info['name']} ({file_info['mime_type']}) - {file_info['source']}")
                         if len(missing_files) > 5:
-                            print(f"     ... and {len(missing_files) - 5} more")
+                            print(f"    ... and {len(missing_files) - 5} more")
                 else:
-                    print("  ✅ All available files were loaded successfully!")
+                    print("All available files were loaded successfully!")
             
             # Check for potential issues
             if len(docs) == 0:
-                print("⚠️  No documents found. Possible issues:")
-                print("   - No supported file types in any accessible location")
-                print("   - Permission issues with files")
-                print("   - Files are too large or corrupted")
-                print("   - Google Drive API permissions insufficient")
+                print("No documents found. Possible issues:")
+                print("  - No supported file types in any accessible location")
+                print("  - Permission issues with files")
+                print("  - Files are too large or corrupted")
+                print("  - Google Drive API permissions insufficient")
             
             elif len(docs) < 5:
-                print("⚠️  Few documents found. Consider:")
-                print("   - Checking if files are in shared drives")
-                print("   - Verifying file permissions")
-                print("   - Ensuring files are supported types")
-                print("   - Checking if files are in subfolders")
+                print("Few documents found. Consider:")
+                print("  - Checking if files are in shared drives")
+                print("  - Verifying file permissions")
+                print("  - Ensuring files are supported types")
+                print("  - Checking if files are in subfolders")
             
         else:
-            print("❌ No documents loaded from Google Drive")
-            print("🔍 Troubleshooting suggestions:")
-            print("   1. Check if you have files in any accessible Google Drive location")
-            print("   2. Verify file types are supported (PDF, DOCX, TXT, etc.)")
-            print("   3. Check file permissions and sharing settings")
-            print("   4. Ensure Google Drive API has sufficient permissions")
-            print("   5. Try the debug mode to see what files are accessible")
+            print("No documents loaded from Google Drive")
+            print("Troubleshooting suggestions:")
+            print("  1. Check if you have files in any accessible Google Drive location")
+            print("  2. Verify file types are supported (PDF, DOCX, TXT, etc.)")
+            print("  3. Check file permissions and sharing settings")
+            print("  4. Ensure Google Drive API has sufficient permissions")
+            print("  5. Try the debug mode to see what files are accessible")
         
     except Exception as e:
         print(f"Error loading documents: {e}")
@@ -390,13 +375,13 @@ def load_or_create_vectorstore(documents=None, user_id="default", use_existing=F
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
     if use_existing and os.path.exists(os.path.join(index_path, "index.faiss")):
-        print("📂 Loading existing FAISS index...")
+        print("Loading existing FAISS index...")
         return FAISS.load_local(index_path, embeddings, allow_dangerous_deserialization=True)
 
     if documents is None:
-        raise ValueError("❌ No documents provided and use_existing=False")
+        raise ValueError("No documents provided and use_existing=False")
 
-    print(f"📦 Creating new FAISS index from documents with chunk_size={chunk_size}, chunk_overlap={chunk_overlap}...")
+    print(f"Creating new FAISS index from documents with chunk_size={chunk_size}, chunk_overlap={chunk_overlap}...")
     
     # Enhanced text splitter with better parameters
     text_splitter = RecursiveCharacterTextSplitter(
@@ -417,7 +402,7 @@ def load_or_create_vectorstore(documents=None, user_id="default", use_existing=F
             if 'file_name' not in text.metadata:
                 text.metadata['file_name'] = text.metadata.get('source', 'Unknown')
     
-    print(f"📄 Created {len(texts)} text chunks")
+    print(f"Created {len(texts)} text chunks")
     
     vectorstore = FAISS.from_documents(texts, embeddings)
     vectorstore.save_local(index_path)
@@ -425,16 +410,16 @@ def load_or_create_vectorstore(documents=None, user_id="default", use_existing=F
     return vectorstore
 
 def build_faiss_index(documents, embeddings, index_dir):
-    print("🧩 Splitting documents into chunks...")
+    print("Splitting documents into chunks...")
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     chunks = splitter.split_documents(documents)
-    print(f"🔢 Total chunks: {len(chunks)}")
+    print(f"Total chunks: {len(chunks)}")
 
-    print("🧠 Creating FAISS vectorstore...")
+    print("Creating FAISS vectorstore...")
     vectorstore = FAISS.from_documents(chunks, embeddings)
     os.makedirs(index_dir, exist_ok=True)
     vectorstore.save_local(index_dir)
-    print(f"✅ FAISS index saved at: {index_dir}")
+    print(f"FAISS index saved at: {index_dir}")
     return vectorstore
 
 def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, model="claude-3-haiku-20240307", temperature=0.01, search_strategy="mmr", confidence_threshold=0.5, prompt_template="default", max_context_length=6000):
@@ -511,8 +496,8 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
                     all_texts.append(clean)
         return sections
 
-    print(f"\n💬 New query received: {query}")
-    print(f"🔧 Using model: {model}, retrieval_count: {retrieval_count}, temperature: {temperature}, search_strategy: {search_strategy}, confidence_threshold: {confidence_threshold}, prompt_template: {prompt_template}, max_context_length: {max_context_length}")
+    print(f"\nNew query received: {query}")
+    print(f"Using model: {model}, retrieval_count: {retrieval_count}, temperature: {temperature}, search_strategy: {search_strategy}, confidence_threshold: {confidence_threshold}, prompt_template: {prompt_template}, max_context_length: {max_context_length}")
     
     # Enhanced retrieval with multiple strategies for better coverage
     all_docs = []
@@ -528,9 +513,9 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
         )
         mmr_docs = mmr_retriever.invoke(query)
         all_docs.extend(mmr_docs)
-        print(f"📄 MMR retrieved {len(mmr_docs)} documents from entire database")
+        print(f"MMR retrieved {len(mmr_docs)} documents from entire database")
     except Exception as e:
-        print(f"⚠️ MMR retrieval failed: {e}")
+        print(f"MMR retrieval failed: {e}")
     
     try:
         # Strategy 2: Similarity search for most relevant - search more documents
@@ -540,9 +525,9 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
         )
         similarity_docs = similarity_retriever.invoke(query)
         all_docs.extend(similarity_docs)
-        print(f"📄 Similarity retrieved {len(similarity_docs)} documents from entire database")
+        print(f"Similarity retrieved {len(similarity_docs)} documents from entire database")
     except Exception as e:
-        print(f"⚠️ Similarity retrieval failed: {e}")
+        print(f"Similarity retrieval failed: {e}")
     
     try:
         # Strategy 3: Similarity with lower threshold to get more documents
@@ -552,9 +537,9 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
         )
         threshold_docs = threshold_retriever.invoke(query)
         all_docs.extend(threshold_docs)
-        print(f"📄 Threshold retrieved {len(threshold_docs)} documents from entire database")
+        print(f"Threshold retrieved {len(threshold_docs)} documents from entire database")
     except Exception as e:
-        print(f"⚠️ Threshold retrieval failed: {e}")
+        print(f"Threshold retrieval failed: {e}")
     
     # Strategy 4: Additional broad search to ensure we don't miss anything
     try:
@@ -564,23 +549,23 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
         )
         broad_docs = broad_retriever.invoke(query)
         all_docs.extend(broad_docs)
-        print(f"📄 Broad search retrieved {len(broad_docs)} documents from entire database")
+        print(f"Broad search retrieved {len(broad_docs)} documents from entire database")
     except Exception as e:
-        print(f"⚠️ Broad search failed: {e}")
+        print(f"Broad search failed: {e}")
     
     # Fallback: If no documents found, try basic similarity search
     if not all_docs:
-        print("⚠️ No documents found with advanced strategies, trying basic similarity search...")
+        print("No documents found with advanced strategies, trying basic similarity search...")
         try:
             basic_retriever = vectorstore.as_retriever(
                 search_type="similarity",
                 search_kwargs={"k": 20}  # Search more documents
             )
             all_docs = basic_retriever.invoke(query)
-            print(f"📄 Basic similarity retrieved {len(all_docs)} documents from entire database")
+            print(f"Basic similarity retrieved {len(all_docs)} documents from entire database")
         except Exception as e:
-            print(f"❌ Basic similarity also failed: {e}")
-            return "❌ Error: Unable to retrieve any documents from the vector store."
+            print(f"Basic similarity also failed: {e}")
+            return "Error: Unable to retrieve any documents from the vector store."
     
     # Remove duplicates while preserving order
     seen_ids = set()
@@ -592,16 +577,16 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
             seen_ids.add(doc_id)
             unique_docs.append(doc)
     
-    print(f"📄 Total unique documents after deduplication: {len(unique_docs)}")
+    print(f"Total unique documents after deduplication: {len(unique_docs)}")
     
     # Use ALL documents from the vector database - don't filter by relevance
     # This ensures we search the entire database and don't miss any information
     final_docs = unique_docs
-    print(f"📄 Using ALL {len(final_docs)} documents from vector database (no relevance filtering)")
+    print(f"Using ALL {len(final_docs)} documents from vector database (no relevance filtering)")
     
     # Check if we have any documents at all
     if not final_docs:
-        return "❌ No documents found in the vector database. Please check if documents were properly loaded."
+        return "No documents found in the vector database. Please check if documents were properly loaded."
     
     # Limit to max_context_length while preserving most relevant
     total_chars = 0
@@ -615,7 +600,7 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
             break
     
     final_docs = final_docs_limited
-    print(f"📄 Final documents used: {len(final_docs)} (total chars: {total_chars:,})")
+    print(f"Final documents used: {len(final_docs)} (total chars: {total_chars:,})")
     
     # Enhanced relevance filtering - focus on the specific person being asked about
     query_words = set(query.lower().split())
@@ -629,13 +614,13 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
     potential_names.extend(lowercase_words)
     
     query_lower = query.lower()
-    print(f"🔍 Query: '{query}'")
-    print(f"🔍 Potential names found: {potential_names}")
+    print(f"Query: '{query}'")
+    print(f"Potential names found: {potential_names}")
     
     # If query contains a specific name, ONLY include documents with that name
     if potential_names:
         primary_name = potential_names[0].lower()
-        print(f"🔍 Looking for documents about: {primary_name}")
+        print(f"Looking for documents about: {primary_name}")
         
         # STRICT filtering: only include documents that actually mention the person
         for doc in final_docs:
@@ -649,17 +634,17 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
             # Only include if the name is actually found
             if name_in_content or name_in_title:
                 relevant_docs.append(doc)
-                print(f"✅ Document '{doc.metadata.get('title', 'Unknown')}' contains '{primary_name}'")
+                print(f"Document '{doc.metadata.get('title', 'Unknown')}' contains '{primary_name}'")
             else:
-                print(f"❌ Document '{doc.metadata.get('title', 'Unknown')}' does NOT contain '{primary_name}' - EXCLUDED")
+                print(f"Document '{doc.metadata.get('title', 'Unknown')}' does NOT contain '{primary_name}' - EXCLUDED")
         
-        print(f"📄 Found {len(relevant_docs)} documents that actually mention '{primary_name}'")
+        print(f"Found {len(relevant_docs)} documents that actually mention '{primary_name}'")
         
         # If no documents found with the name, return early
         if not relevant_docs:
-            return f"❌ No documents found containing information about '{primary_name}'. Please check if this person's documents are in your Google Drive."
+            return f"No documents found containing information about '{primary_name}'. Please check if this person's documents are in your Google Drive."
     else:
-        print(f"⚠️ No potential names found in query: '{query}'")
+        print(f"No potential names found in query: '{query}'")
         # Fallback to word overlap if no specific name
         for doc in final_docs:
             doc_content_lower = doc.page_content.lower()
@@ -669,15 +654,15 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
                 relevant_docs.append(doc)
     
     if not relevant_docs:
-        print(f"⚠️ No documents found with strict relevance check for query: '{query}'")
-        return f"❌ No relevant documents found for your question. Please check if the information exists in your documents."
+        print(f"No documents found with strict relevance check for query: '{query}'")
+        return f"No relevant documents found for your question. Please check if the information exists in your documents."
     
     # Use relevant documents
     final_docs = relevant_docs
-    print(f"📄 Using {len(final_docs)} relevant documents")
+    print(f"Using {len(final_docs)} relevant documents")
     
     # Debug: Show which documents are being used
-    print("\n📋 Documents being used for answer:")
+    print("\nDocuments being used for answer:")
     for i, doc in enumerate(final_docs, 1):
         title = doc.metadata.get('title', 'Unknown Document')
         source = doc.metadata.get('source', 'Unknown Source')
@@ -688,7 +673,7 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
         print()
     
     # Debug: Show content vs metadata
-    print("🔍 Content Analysis:")
+    print("Content Analysis:")
     total_content_chars = sum(len(doc.page_content) for doc in final_docs)
     print(f"   Total content characters: {total_content_chars:,}")
     print(f"   Number of documents: {len(final_docs)}")
@@ -697,9 +682,9 @@ def query_llm(vectorstore, query, evaluate_response=True, retrieval_count=8, mod
     # Check for documents with very little content
     low_content_docs = [doc for doc in final_docs if len(doc.page_content) < 50]
     if low_content_docs:
-        print(f"   ⚠️ {len(low_content_docs)} documents have very little content (< 50 chars):")
+        print(f"  {len(low_content_docs)} documents have very little content (< 50 chars):")
         for doc in low_content_docs:
-            print(f"      - {doc.metadata.get('title', 'Unknown')}: '{doc.page_content}'")
+            print(f"    - {doc.metadata.get('title', 'Unknown')}: '{doc.page_content}'")
     
     # Enhanced prompt template to search entire vector database
     enhanced_prompt = """You are a helpful AI assistant. Answer the question by searching and using ONLY information that is EXPLICITLY stated in the documents provided in the context below. 
@@ -771,7 +756,7 @@ Answer:"""
         )
 
         result = qa.invoke({"query": query})
-        print("✅ Claude answered successfully.")
+        print("Claude answered successfully.")
 
         # Validate that the response is based on actual context
         response_text = result['result']
@@ -814,20 +799,20 @@ Answer:"""
             import re
             links = re.findall(r'https?://[^\s]+', content)
             if links:
-                extracted_info.append(f"📎 Links in '{title}': {', '.join(links)}")
+                extracted_info.append(f"Links in '{title}': {', '.join(links)}")
 
             # Extract emails
             emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', content)
             if emails:
-                extracted_info.append(f"📧 Emails in '{title}': {', '.join(emails)}")
+                extracted_info.append(f"Emails in '{title}': {', '.join(emails)}")
 
             # Extract phone numbers (more specific pattern)
             phones = re.findall(r'\+91\s*\d{10}', content)  # Indian phone numbers
             if phones:
-                extracted_info.append(f"📞 Phone numbers in '{title}': {', '.join(phones)}")
+                extracted_info.append(f"Phone numbers in '{title}': {', '.join(phones)}")
 
         if extracted_info:
-            context_validation += "\n\n🔍 **Extracted Information from Documents**:\n" + "\n".join(extracted_info)
+            context_validation += "\n\nExtracted Information from Documents:\n" + "\n".join(extracted_info)
 
         # Check if response contains file names or titles
         file_names_in_response = []
@@ -837,7 +822,7 @@ Answer:"""
                 file_names_in_response.append(doc_title)
         
         if file_names_in_response:
-            context_validation += f"\n\n⚠️ **Warning**: Response may be based on file names rather than content. Detected file names: {', '.join(file_names_in_response)}"
+            context_validation += f"\n\nWarning: Response may be based on file names rather than content. Detected file names: {', '.join(file_names_in_response)}"
         
         # Check if response contains specific details from content
         context_words = set()
@@ -850,13 +835,13 @@ Answer:"""
         overlap = len(context_words.intersection(response_words))
         
         if overlap < 5:  # If very few content words overlap
-            context_validation += "\n\n⚠️ **Note**: This response may not be fully based on the actual document content. Please verify the information."
+            context_validation += "\n\nNote: This response may not be fully based on the actual document content. Please verify the information."
         
         # Check if response is too generic
         if len(response_text) < 100:
-            context_validation += "\n\n⚠️ **Note**: Response seems brief. This might indicate limited information in the documents or the model not using all available content."
+            context_validation += "\n\nNote: Response seems brief. This might indicate limited information in the documents or the model not using all available content."
         
-        response = f"📌 **Answer**:\n{response_text}{context_validation}\n\n📎 **Sources Used**:\n{sources}"
+        response = f"Answer:\n{response_text}{context_validation}\n\nSources Used:\n{sources}"
         
         # Add evaluation if requested
         if evaluate_response:
@@ -864,29 +849,29 @@ Answer:"""
                 from evaluator import evaluate_qa_response
                 evaluation = evaluate_qa_response(query, result['result'])
                 
-                eval_info = f"\n\n📊 **Response Quality**:\n"
+                eval_info = f"\n\nResponse Quality:\n"
                 eval_info += f"• Relevance: {evaluation.get('relevance_score', 'N/A')}/5\n"
                 eval_info += f"• Completeness: {evaluation.get('completeness_score', 'N/A')}/5\n"
                 eval_info += f"• Overall Score: {evaluation.get('overall_score', 'N/A')}/5"
                 
                 response += eval_info
-                print(f"✅ Response evaluated - Score: {evaluation.get('overall_score', 'N/A')}")
+                print(f"Response evaluated - Score: {evaluation.get('overall_score', 'N/A')}")
                 
             except Exception as e:
-                print(f"❌ Evaluation failed: {e}")
-                response += "\n\n❌ Evaluation failed"
+                print(f"Evaluation failed: {e}")
+                response += "\n\nEvaluation failed"
         
         return response
     except Exception as e:
-        print(f"❌ Claude query failed: {e}")
-        return f"❌ Error: {str(e)}"
+        print(f"Claude query failed: {e}")
+        return f"Error: {str(e)}"
 
 def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count=8, model="claude-3-haiku-20240307", temperature=0.01, search_strategy="mmr", confidence_threshold=0.5, prompt_template="default", max_context_length=6000):        
     """
     Streaming version of query_llm that yields tokens as they are generated.
     """
-    print(f"\n💬 New streaming query received: {query}")
-    print(f"🔧 Using model: {model}, retrieval_count: {retrieval_count}, temperature: {temperature}, search_strategy: {search_strategy}, confidence_threshold: {confidence_threshold}, prompt_template: {prompt_template}, max_context_length: {max_context_length}")
+    print(f"\nNew streaming query received: {query}")
+    print(f"Using model: {model}, retrieval_count: {retrieval_count}, temperature: {temperature}, search_strategy: {search_strategy}, confidence_threshold: {confidence_threshold}, prompt_template: {prompt_template}, max_context_length: {max_context_length}")
     
     # Enhanced retrieval with multiple strategies for better coverage
     all_docs = []
@@ -902,9 +887,9 @@ def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count
         )
         mmr_docs = mmr_retriever.invoke(query)
         all_docs.extend(mmr_docs)
-        print(f"📄 MMR retrieved {len(mmr_docs)} documents from entire database")
+        print(f"MMR retrieved {len(mmr_docs)} documents from entire database")
     except Exception as e:
-        print(f"⚠️ MMR retrieval failed: {e}")
+        print(f"MMR retrieval failed: {e}")
     
     try:
         # Strategy 2: Similarity search for most relevant - search more documents
@@ -914,9 +899,9 @@ def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count
         )
         similarity_docs = similarity_retriever.invoke(query)
         all_docs.extend(similarity_docs)
-        print(f"📄 Similarity retrieved {len(similarity_docs)} documents from entire database")
+        print(f"Similarity retrieved {len(similarity_docs)} documents from entire database")
     except Exception as e:
-        print(f"⚠️ Similarity retrieval failed: {e}")
+        print(f"Similarity retrieval failed: {e}")
     
     try:
         # Strategy 3: Similarity with lower threshold to get more documents
@@ -926,9 +911,9 @@ def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count
         )
         threshold_docs = threshold_retriever.invoke(query)
         all_docs.extend(threshold_docs)
-        print(f"📄 Threshold retrieved {len(threshold_docs)} documents from entire database")
+        print(f"Threshold retrieved {len(threshold_docs)} documents from entire database")
     except Exception as e:
-        print(f"⚠️ Threshold retrieval failed: {e}")
+        print(f"Threshold retrieval failed: {e}")
     
     # Strategy 4: Additional broad search to ensure we don't miss anything
     try:
@@ -938,23 +923,23 @@ def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count
         )
         broad_docs = broad_retriever.invoke(query)
         all_docs.extend(broad_docs)
-        print(f"📄 Broad search retrieved {len(broad_docs)} documents from entire database")
+        print(f"Broad search retrieved {len(broad_docs)} documents from entire database")
     except Exception as e:
-        print(f"⚠️ Broad search failed: {e}")
+        print(f"Broad search failed: {e}")
     
     # Fallback: If no documents found, try basic similarity search
     if not all_docs:
-        print("⚠️ No documents found with advanced strategies, trying basic similarity search...")
+        print("No documents found with advanced strategies, trying basic similarity search...")
         try:
             basic_retriever = vectorstore.as_retriever(
                 search_type="similarity",
                 search_kwargs={"k": 20}  # Search more documents
             )
             all_docs = basic_retriever.invoke(query)
-            print(f"📄 Basic similarity retrieved {len(all_docs)} documents from entire database")
+            print(f"Basic similarity retrieved {len(all_docs)} documents from entire database")
         except Exception as e:
-            print(f"❌ Basic similarity also failed: {e}")
-            yield "❌ Error: Unable to retrieve any documents from the vector store."
+            print(f"Basic similarity also failed: {e}")
+            yield "Error: Unable to retrieve any documents from the vector store."
             return
     
     # Remove duplicates while preserving order
@@ -967,16 +952,16 @@ def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count
             seen_ids.add(doc_id)
             unique_docs.append(doc)
     
-    print(f"📄 Total unique documents after deduplication: {len(unique_docs)}")
+    print(f"Total unique documents after deduplication: {len(unique_docs)}")
     
     # Use ALL documents from the vector database - don't filter by relevance
     # This ensures we search the entire database and don't miss any information
     final_docs = unique_docs
-    print(f"📄 Using ALL {len(final_docs)} documents from vector database (no relevance filtering)")
+    print(f"Using ALL {len(final_docs)} documents from vector database (no relevance filtering)")
     
     # Check if we have any documents at all
     if not final_docs:
-        yield "❌ No documents found in the vector database. Please check if documents were properly loaded."
+        yield "No documents found in the vector database. Please check if documents were properly loaded."
         return
     
     # Limit to max_context_length while preserving most relevant
@@ -991,7 +976,7 @@ def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count
             break
     
     final_docs = final_docs_limited
-    print(f"📄 Final documents used: {len(final_docs)} (total chars: {total_chars:,})")
+    print(f"Final documents used: {len(final_docs)} (total chars: {total_chars:,})")
     
     # Enhanced relevance filtering - focus on the specific person being asked about
     query_words = set(query.lower().split())
@@ -1005,13 +990,13 @@ def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count
     potential_names.extend(lowercase_words)
     
     query_lower = query.lower()
-    print(f"🔍 Query: '{query}'")
-    print(f"🔍 Potential names found: {potential_names}")
+    print(f"Query: '{query}'")
+    print(f"Potential names found: {potential_names}")
     
     # If query contains a specific name, ONLY include documents with that name
     if potential_names:
         primary_name = potential_names[0].lower()
-        print(f"🔍 Looking for documents about: {primary_name}")
+        print(f"Looking for documents about: {primary_name}")
         
         # STRICT filtering: only include documents that actually mention the person
         for doc in final_docs:
@@ -1025,18 +1010,18 @@ def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count
             # Only include if the name is actually found
             if name_in_content or name_in_title:
                 relevant_docs.append(doc)
-                print(f"✅ Document '{doc.metadata.get('title', 'Unknown')}' contains '{primary_name}'")
+                print(f"Document '{doc.metadata.get('title', 'Unknown')}' contains '{primary_name}'")
             else:
-                print(f"❌ Document '{doc.metadata.get('title', 'Unknown')}' does NOT contain '{primary_name}' - EXCLUDED")
+                print(f"Document '{doc.metadata.get('title', 'Unknown')}' does NOT contain '{primary_name}' - EXCLUDED")
         
-        print(f"📄 Found {len(relevant_docs)} documents that actually mention '{primary_name}'")
+        print(f"Found {len(relevant_docs)} documents that actually mention '{primary_name}'")
         
         # If no documents found with the name, return early
         if not relevant_docs:
-            yield f"❌ No documents found containing information about '{primary_name}'. Please check if this person's documents are in your Google Drive."
+            yield f"No documents found containing information about '{primary_name}'. Please check if this person's documents are in your Google Drive."
             return
     else:
-        print(f"⚠️ No potential names found in query: '{query}'")
+        print(f"No potential names found in query: '{query}'")
         # Fallback to word overlap if no specific name
         for doc in final_docs:
             doc_content_lower = doc.page_content.lower()
@@ -1046,16 +1031,16 @@ def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count
                 relevant_docs.append(doc)
     
     if not relevant_docs:
-        print(f"⚠️ No documents found with strict relevance check for query: '{query}'")
-        yield f"❌ No relevant documents found for your question. Please check if the information exists in your documents."
+        print(f"No documents found with strict relevance check for query: '{query}'")
+        yield f"No relevant documents found for your question. Please check if the information exists in your documents."
         return
     
     # Use relevant documents
     final_docs = relevant_docs
-    print(f"📄 Using {len(final_docs)} relevant documents")
+    print(f"Using {len(final_docs)} relevant documents")
     
     # Debug: Show which documents are being used
-    print("\n📋 Documents being used for answer:")
+    print("\nDocuments being used for answer:")
     for i, doc in enumerate(final_docs, 1):
         title = doc.metadata.get('title', 'Unknown Document')
         source = doc.metadata.get('source', 'Unknown Source')
@@ -1066,7 +1051,7 @@ def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count
         print()
     
     # Debug: Show content vs metadata
-    print("🔍 Content Analysis:")
+    print("Content Analysis:")
     total_content_chars = sum(len(doc.page_content) for doc in final_docs)
     print(f"   Total content characters: {total_content_chars:,}")
     print(f"   Number of documents: {len(final_docs)}")
@@ -1075,9 +1060,9 @@ def query_llm_stream(vectorstore, query, evaluate_response=True, retrieval_count
     # Check for documents with very little content
     low_content_docs = [doc for doc in final_docs if len(doc.page_content) < 50]
     if low_content_docs:
-        print(f"   ⚠️ {len(low_content_docs)} documents have very little content (< 50 chars):")
+        print(f"  {len(low_content_docs)} documents have very little content (< 50 chars):")
         for doc in low_content_docs:
-            print(f"      - {doc.metadata.get('title', 'Unknown')}: '{doc.page_content}'")
+            print(f"    - {doc.metadata.get('title', 'Unknown')}: '{doc.page_content}'")
     
     # Enhanced prompt template to search entire vector database
     enhanced_prompt = """You are a helpful AI assistant. Answer the question by searching and using ONLY information that is EXPLICITLY stated in the documents provided in the context below. 
@@ -1190,20 +1175,20 @@ Answer:"""
             import re
             links = re.findall(r'https?://[^\s]+', content)
             if links:
-                extracted_info.append(f"📎 Links in '{title}': {', '.join(links)}")
+                extracted_info.append(f"Links in '{title}': {', '.join(links)}")
 
             # Extract emails
             emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', content)
             if emails:
-                extracted_info.append(f"📧 Emails in '{title}': {', '.join(emails)}")
+                extracted_info.append(f"Emails in '{title}': {', '.join(emails)}")
 
             # Extract phone numbers (more specific pattern)
             phones = re.findall(r'\+91\s*\d{10}', content)  # Indian phone numbers
             if phones:
-                extracted_info.append(f"📞 Phone numbers in '{title}': {', '.join(phones)}")
+                extracted_info.append(f"Phone numbers in '{title}': {', '.join(phones)}")
 
         if extracted_info:
-            context_validation += "\n\n🔍 **Extracted Information from Documents**:\n" + "\n".join(extracted_info)
+            context_validation += "\n\nExtracted Information from Documents:\n" + "\n".join(extracted_info)
 
         # Check if response contains file names or titles
         file_names_in_response = []
@@ -1213,7 +1198,7 @@ Answer:"""
                 file_names_in_response.append(doc_title)
         
         if file_names_in_response:
-            context_validation += f"\n\n⚠️ **Warning**: Response may be based on file names rather than content. Detected file names: {', '.join(file_names_in_response)}"
+            context_validation += f"\n\nWarning: Response may be based on file names rather than content. Detected file names: {', '.join(file_names_in_response)}"
         
         # Check if response contains specific details from content
         context_words = set()
@@ -1226,13 +1211,13 @@ Answer:"""
         overlap = len(context_words.intersection(response_words))
         
         if overlap < 5:  # If very few content words overlap
-            context_validation += "\n\n⚠️ **Note**: This response may not be fully based on the actual document content. Please verify the information."
+            context_validation += "\n\nNote: This response may not be fully based on the actual document content. Please verify the information."
         
         # Check if response is too generic
         if len(response_text) < 100:
-            context_validation += "\n\n⚠️ **Note**: Response seems brief. This might indicate limited information in the documents or the model not using all available content."
+            context_validation += "\n\nNote: Response seems brief. This might indicate limited information in the documents or the model not using all available content."
         
-        response = f"📌 **Answer**:\n{response_text}{context_validation}\n\n📎 **Sources Used**:\n{sources}"
+        response = f"Answer:\n{response_text}{context_validation}\n\nSources Used:\n{sources}"
         
         # Add evaluation if requested
         if evaluate_response:
@@ -1240,22 +1225,22 @@ Answer:"""
                 from evaluator import evaluate_qa_response
                 evaluation = evaluate_qa_response(query, result['result'])
                 
-                eval_info = f"\n\n📊 **Response Quality**:\n"
+                eval_info = f"\n\nResponse Quality:\n"
                 eval_info += f"• Relevance: {evaluation.get('relevance_score', 'N/A')}/5\n"
                 eval_info += f"• Completeness: {evaluation.get('completeness_score', 'N/A')}/5\n"
                 eval_info += f"• Overall Score: {evaluation.get('overall_score', 'N/A')}/5"
                 
                 response += eval_info
-                print(f"✅ Response evaluated - Score: {evaluation.get('overall_score', 'N/A')}")
+                print(f"Response evaluated - Score: {evaluation.get('overall_score', 'N/A')}")
                 
             except Exception as e:
-                print(f"❌ Evaluation failed: {e}")
-                response += "\n\n❌ Evaluation failed"
+                print(f"Evaluation failed: {e}")
+                response += "\n\nEvaluation failed"
         
         # Stream the response character by character for a more natural effect
         for i in range(len(response)):
             yield response[:i+1]
             
     except Exception as e:
-        print(f"❌ Claude query failed: {e}")
-        yield f"❌ Error: {str(e)}"
+        print(f"Claude query failed: {e}")
+        yield f"Error: {str(e)}"

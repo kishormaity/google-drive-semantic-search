@@ -26,7 +26,7 @@ default_config = {
 def display_user_message(message, chat_history):
     chat_history.append({"role": "user", "content": message})
     # Add a stable loading indicator
-    chat_history.append({"role": "assistant", "content": "🔄 Processing your request..."})
+    chat_history.append({"role": "assistant", "content": "Processing your request..."})
     return chat_history, "", message  # Clear textbox, return last user message
 
 # === Step 2: Generate assistant response with config ===
@@ -38,17 +38,29 @@ def respond_to_user(chat_history, last_user_message):
             index_path = f"user_data/{user_id}/faiss_index"
 
             if os.path.exists(os.path.join(index_path, "index.faiss")):
-                print("⚡ FAISS exists. Loading index...")
+                print("FAISS exists. Loading index...")
+                # Add status message for token check
+                chat_history.append({"role": "assistant", "content": f"Checking authentication for {user_id}..."})
+                
+                # Check if token exists
+                token_path = f"tokens/{user_id}_token.json"
+                if os.path.exists(token_path):
+                    chat_history.append({"role": "assistant", "content": f"Token found for {user_id}. Loading existing session..."})
+                
                 vectorstore = load_or_create_vectorstore(documents=None, user_id=user_id, use_existing=True)
+                chat_history.append({"role": "assistant", "content": f"Session loaded successfully for {user_id}."})
             else:
-                print(f"📁 First time login — authenticating and loading documents for: {user_id}")
+                print(f"First time login — authenticating and loading documents for: {user_id}")
+                
+                # Add status message for first-time login
+                chat_history.append({"role": "assistant", "content": f"First time login for {user_id}. Starting authentication..."})
                 
                 # Debug: List files first if requested
                 if user_id.lower().startswith("debug:"):
                     debug_user = user_id[6:]  # Remove "debug:" prefix
                     from main import list_drive_files
                     list_drive_files(debug_user)
-                    response = f"🔍 Debug mode: Listed files for {debug_user}. Check console for details."
+                    response = f"Debug mode: Listed files for {debug_user}. Check console for details."
                     chat_history.append({"role": "assistant", "content": response})
                     return chat_history, chat_history
                 
@@ -57,9 +69,16 @@ def respond_to_user(chat_history, last_user_message):
                     test_user = user_id[5:]  # Remove "test:" prefix
                     from main import test_comprehensive_loading
                     docs = test_comprehensive_loading(test_user)
-                    response = f"🧪 Comprehensive test completed for {test_user}. Loaded {len(docs)} documents. Check console for detailed analysis."
+                    response = f"Comprehensive test completed for {test_user}. Loaded {len(docs)} documents. Check console for detailed analysis."
                     chat_history.append({"role": "assistant", "content": response})
                     return chat_history, chat_history
+                
+                # Check token status
+                token_path = f"tokens/{user_id}_token.json"
+                if os.path.exists(token_path):
+                    chat_history.append({"role": "assistant", "content": f"Existing token found for {user_id}. Loading documents..."})
+                else:
+                    chat_history.append({"role": "assistant", "content": f"Creating new authentication for {user_id}..."})
                 
                 docs = load_documents(user_id)
                 # Use default config for chunk settings
@@ -74,9 +93,9 @@ def respond_to_user(chat_history, last_user_message):
             user_state["user_id"] = user_id
             user_state["logged_in"] = True
 
-            response = f"✅ Logged in as {user_id}. You can now ask questions about your documents."
+            response = f"Successfully logged in as {user_id}. You can now ask questions about your documents."
         except Exception as e:
-            response = f"❌ Login failed: {str(e)}"
+            response = f"Login failed: {str(e)}"
     else:
         user_id = user_state["user_id"]
         vectorstore = sessions[user_id]["vectorstore"]
@@ -109,17 +128,33 @@ def respond_to_user_stream(chat_history, last_user_message):
             index_path = f"user_data/{user_id}/faiss_index"
 
             if os.path.exists(os.path.join(index_path, "index.faiss")):
-                print("⚡ FAISS exists. Loading index...")
+                print("FAISS exists. Loading index...")
+                # Add status message for token check
+                chat_history.append({"role": "assistant", "content": f"Checking authentication for {user_id}..."})
+                yield chat_history
+                
+                # Check if token exists
+                token_path = f"tokens/{user_id}_token.json"
+                if os.path.exists(token_path):
+                    chat_history.append({"role": "assistant", "content": f"Token found for {user_id}. Loading existing session..."})
+                yield chat_history
+                
                 vectorstore = load_or_create_vectorstore(documents=None, user_id=user_id, use_existing=True)
+                chat_history.append({"role": "assistant", "content": f"Session loaded successfully for {user_id}."})
+                yield chat_history
             else:
-                print(f"📁 First time login — authenticating and loading documents for: {user_id}")
+                print(f"First time login — authenticating and loading documents for: {user_id}")
+                
+                # Add status message for first-time login
+                chat_history.append({"role": "assistant", "content": f"First time login for {user_id}. Starting authentication..."})
+                yield chat_history
                 
                 # Debug: List files first if requested
                 if user_id.lower().startswith("debug:"):
                     debug_user = user_id[6:]  # Remove "debug:" prefix
                     from main import list_drive_files
                     list_drive_files(debug_user)
-                    response = f"🔍 Debug mode: Listed files for {debug_user}. Check console for details."
+                    response = f"Debug mode: Listed files for {debug_user}. Check console for details."
                     chat_history.append({"role": "assistant", "content": response})
                     yield chat_history
                     return
@@ -129,10 +164,18 @@ def respond_to_user_stream(chat_history, last_user_message):
                     test_user = user_id[5:]  # Remove "test:" prefix
                     from main import test_comprehensive_loading
                     docs = test_comprehensive_loading(test_user)
-                    response = f"🧪 Comprehensive test completed for {test_user}. Loaded {len(docs)} documents. Check console for detailed analysis."
+                    response = f"Comprehensive test completed for {test_user}. Loaded {len(docs)} documents. Check console for detailed analysis."
                     chat_history.append({"role": "assistant", "content": response})
                     yield chat_history
                     return
+                
+                # Check token status
+                token_path = f"tokens/{user_id}_token.json"
+                if os.path.exists(token_path):
+                    chat_history.append({"role": "assistant", "content": f"Existing token found for {user_id}. Loading documents..."})
+                else:
+                    chat_history.append({"role": "assistant", "content": f"Creating new authentication for {user_id}..."})
+                yield chat_history
                 
                 docs = load_documents(user_id)
                 # Use default config for chunk settings
@@ -147,11 +190,11 @@ def respond_to_user_stream(chat_history, last_user_message):
             user_state["user_id"] = user_id
             user_state["logged_in"] = True
 
-            response = f"✅ Logged in as {user_id}. You can now ask questions about your documents."
+            response = f"Successfully logged in as {user_id}. You can now ask questions about your documents."
             chat_history.append({"role": "assistant", "content": response})
             yield chat_history
         except Exception as e:
-            response = f"❌ Login failed: {str(e)}"
+            response = f"Login failed: {str(e)}"
             chat_history.append({"role": "assistant", "content": response})
             yield chat_history
     else:
@@ -160,7 +203,7 @@ def respond_to_user_stream(chat_history, last_user_message):
         config = sessions[user_id]["config"]
         
         # Remove the loading indicator if it exists
-        if chat_history and chat_history[-1]["content"] == "🔄 Processing your request...":
+        if chat_history and chat_history[-1]["content"] == "Processing your request...":
             chat_history.pop()
         
         # Add empty assistant message
@@ -191,54 +234,38 @@ with gr.Blocks(
     title="Claude Document QA Chatbot",
     theme=gr.themes.Soft(),
     css="""
-        /* Loading screen - appears before chat interface */
-        .loading-screen {
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            width: 100% !important;
-            height: 100% !important;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-            display: flex !important;
-            flex-direction: column !important;
-            justify-content: center !important;
-            align-items: center !important;
-            z-index: 9999 !important;
-            color: white !important;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
+        /* Hide any default Gradio loading screens */
+        .gradio-loading {
+            display: none !important;
         }
         
-        .loading-spinner {
-            width: 60px !important;
-            height: 60px !important;
-            border: 4px solid rgba(255, 255, 255, 0.3) !important;
-            border-top: 4px solid white !important;
-            border-radius: 50% !important;
-            animation: spin 1s linear infinite !important;
-            margin-bottom: 20px !important;
+        /* Hide any loading overlays */
+        .loading-overlay {
+            display: none !important;
         }
         
-        .loading-text {
-            font-size: 18px !important;
-            font-weight: 500 !important;
-            text-align: center !important;
-            margin-bottom: 10px !important;
+        /* Hide any initial loading states */
+        [data-testid="loading"] {
+            display: none !important;
         }
         
-        .loading-subtext {
-            font-size: 14px !important;
-            opacity: 0.8 !important;
-            text-align: center !important;
+        /* Hide any spinning or loading elements */
+        *[class*="loading"],
+        *[class*="spinner"],
+        *[class*="buffering"],
+        *[class*="processing"] {
+            display: none !important;
+        }
+        
+        /* Hide any elements with spinning animations */
+        *[style*="animation"],
+        *[style*="spin"] {
+            display: none !important;
         }
         
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
-        }
-        
-        /* Hide loading screen when app is ready */
-        .app-ready .loading-screen {
-            display: none !important;
         }
         
         /* Responsive container */
@@ -397,35 +424,14 @@ with gr.Blocks(
             }
         }
         
-        /* Loading animation */
-        .loading {
-            display: inline-block !important;
-            width: 20px !important;
-            height: 20px !important;
-            border: 3px solid #f3f3f3 !important;
-            border-top: 3px solid #3498db !important;
-            border-radius: 50% !important;
-            animation: spin 1s linear infinite !important;
-        }
+
         
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
         
-        /* Stable loading indicator */
-        .loading-indicator {
-            display: flex !important;
-            align-items: center !important;
-            gap: 10px !important;
-            color: #666 !important;
-            font-style: italic !important;
-        }
-        
-        .loading-indicator::before {
-            content: "🔄" !important;
-            animation: spin 1s linear infinite !important;
-        }
+
         
         /* Remove extra spacing from rows */
         .gradio-row {
@@ -448,25 +454,10 @@ with gr.Blocks(
         /* Use default Gradio message styling */
     """
 ) as demo:
-    # Loading screen - appears before chat interface loads
-    loading_screen = gr.HTML("""
-        <div class="loading-screen">
-            <div class="loading-spinner"></div>
-        </div>
-        <script>
-            // Hide loading screen when app is ready
-            window.addEventListener('load', function() {
-                setTimeout(function() {
-                    document.body.classList.add('app-ready');
-                }, 1000);
-            });
-        </script>
-    """, visible=False)
-
     # Header
     with gr.Row():
         with gr.Column(scale=1):
-            gr.Markdown("## 🤖 Claude Document QA Chatbot", elem_classes=["title"])
+            gr.Markdown("## Claude Document QA Chatbot", elem_classes=["title"])
 
     initial_message = [{"role": "assistant", "content": "Please enter your email ID to start:"}]
     chat_state = gr.State(initial_message.copy())
@@ -518,5 +509,6 @@ demo.launch(
     height=600,
     width="100%",
     favicon_path=None,
-    inbrowser=True
+    inbrowser=True,
+    quiet=True
 )

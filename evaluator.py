@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from typing import Dict, List, Tuple, Optional
 import json
 from datetime import datetime
+from main import query_llm  # Add missing import
 
 load_dotenv()
 
@@ -39,187 +40,174 @@ Respond ONLY with the number (0, 1, or 2).
         score = int(str(response.content).strip()[0])
         return score
     except Exception as e:
-        print(f"❌ Evaluation failed: {e}")
+        print(f"Evaluation failed: {e}")
         return -1  # Use -1 to indicate error
 
-def evaluate_qa_response(query: str, answer: str, source_documents: List[str] = None) -> Dict:
+def evaluate_qa_response(query, response):
     """
-    Simple evaluation of QA response quality with essential metrics.
-    Returns relevance, completeness, and overall score.
+    Evaluate the quality of a QA response.
     """
-    
-    # 1. Relevance Score
-    relevance_prompt = f"""
-Evaluate how well this answer addresses the user's question.
-
-Question: {query}
-Answer: {answer}
-
-Rate the relevance:
-- 5 = Perfectly answers the question
-- 4 = Very good answer with minor gaps
-- 3 = Good answer but missing some details
-- 2 = Partially relevant but incomplete
-- 1 = Barely relevant
-- 0 = Completely irrelevant
-
-Respond ONLY with the number (0-5).
-"""
-    
-    # 2. Completeness Score
-    completeness_prompt = f"""
-Evaluate how complete this answer is for the given question.
-
-Question: {query}
-Answer: {answer}
-
-Rate the completeness:
-- 5 = Complete answer with all necessary details
-- 4 = Mostly complete with minor omissions
-- 3 = Good coverage but missing some aspects
-- 2 = Partial answer with significant gaps
-- 1 = Very incomplete
-- 0 = No useful information
-
-Respond ONLY with the number (0-5).
-"""
-    
     try:
-        # Get scores
-        relevance_response = llm.invoke(relevance_prompt)
-        relevance_score = int(str(relevance_response.content).strip()[0])
+        # Parse the response to extract the answer
+        lines = response.split('\n')
+        answer = ""
+        in_answer_section = False
         
-        completeness_response = llm.invoke(completeness_prompt)
-        completeness_score = int(str(completeness_response.content).strip()[0])
+        for line in lines:
+            line = line.strip()
+            if line.startswith('Answer:'):
+                answer = line.replace('Answer:', '').strip()
+                in_answer_section = True
+            elif in_answer_section and line and not line.startswith('Sources Used:') and not line.startswith('Response Quality:'):
+                answer += " " + line
+            elif line.startswith('Sources Used:') or line.startswith('Response Quality:'):
+                break
         
-        # Calculate overall score (simple average)
+        if not answer:
+            # Fallback: use the entire response
+            answer = response
+        
+        # Calculate relevance score
+        query_words = set(query.lower().split())
+        answer_words = set(answer.lower().split())
+        
+        # Remove common stop words
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 'mine', 'yours', 'his', 'hers', 'ours', 'theirs'}
+        
+        query_words = query_words - stop_words
+        answer_words = answer_words - stop_words
+        
+        if query_words:
+            relevance_score = len(query_words.intersection(answer_words)) / len(query_words)
+        else:
+            relevance_score = 0
+        
+        # Calculate completeness score based on answer length and content
+        min_length = 50
+        max_length = 1000
+        
+        if len(answer) < min_length:
+            completeness_score = len(answer) / min_length
+        elif len(answer) > max_length:
+            completeness_score = 1.0  # Full score for long answers
+        else:
+            completeness_score = 0.5 + (len(answer) - min_length) / (max_length - min_length) * 0.5
+        
+        # Calculate overall score
         overall_score = (relevance_score + completeness_score) / 2
         
         return {
-            "relevance_score": relevance_score,
-            "completeness_score": completeness_score,
-            "overall_score": round(overall_score, 2),
-            "timestamp": datetime.now().isoformat(),
-            "query": query,
-            "answer_length": len(answer)
+            'relevance_score': round(relevance_score * 5, 2),
+            'completeness_score': round(completeness_score * 5, 2),
+            'overall_score': round(overall_score * 5, 2)
         }
         
     except Exception as e:
-        print(f"❌ Evaluation failed: {e}")
+        print(f"Evaluation failed: {e}")
         return {
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
+            'relevance_score': 0,
+            'completeness_score': 0,
+            'overall_score': 0
         }
 
-def evaluate_retrieval_quality(query: str, retrieved_docs: List[str], expected_keywords: List[str] = None) -> Dict:
+def evaluate_retrieval_quality(vectorstore, query, retrieved_docs):
     """
-    Simple evaluation of document retrieval quality.
+    Evaluate the quality of document retrieval.
     """
-    
-    if not retrieved_docs:
+    try:
+        # Calculate average relevance score
+        total_relevance = 0
+        for doc in retrieved_docs:
+            # Simple relevance calculation based on word overlap
+            query_words = set(query.lower().split())
+            doc_words = set(doc.page_content.lower().split())
+            
+            # Remove stop words
+            stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+            query_words = query_words - stop_words
+            doc_words = doc_words - stop_words
+            
+            if query_words:
+                relevance = len(query_words.intersection(doc_words)) / len(query_words)
+            else:
+                relevance = 0
+            
+            total_relevance += relevance
+        
+        avg_relevance = total_relevance / len(retrieved_docs) if retrieved_docs else 0
+        
+        # Scale to 0-5
+        retrieval_score = avg_relevance * 2.5
+        
+        return {
+            "retrieval_score": round(retrieval_score, 2),
+            "documents_retrieved": len(retrieved_docs),
+            "issues": [] if retrieval_score >= 3 else ["Low relevance documents"]
+        }
+        
+    except Exception as e:
+        print(f"Evaluation failed: {e}")
         return {
             "retrieval_score": 0,
             "documents_retrieved": 0,
-            "issues": ["No documents retrieved"]
+            "issues": ["Evaluation error"]
         }
-    
-    # Simple relevance evaluation
-    relevance_scores = []
-    for doc in retrieved_docs[:3]:  # Evaluate first 3 docs
-        score = evaluate_semantic_match(query, doc[:500])  # Use first 500 chars
-        if score >= 0:
-            relevance_scores.append(score)
-    
-    avg_relevance = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0
-    retrieval_score = avg_relevance * 2.5  # Scale to 0-5
 
-    return {
-        "retrieval_score": round(retrieval_score, 2),
-        "documents_retrieved": len(retrieved_docs),
-        "issues": [] if retrieval_score >= 3 else ["Low relevance documents"]
-    }
-
-def run_evaluation_test_suite(vectorstore, test_queries: List[Tuple[str, str]] = None) -> Dict:
+def run_comprehensive_evaluation(vectorstore, test_queries):
     """
-    Run a simple evaluation test suite on the QA system.
+    Run comprehensive evaluation on multiple test queries.
     """
+    results = []
     
-    if test_queries is None:
-        test_queries = [
-            ("What is the main topic?", "General knowledge question"),
-            ("How does this work?", "Process explanation question"),
-            ("What are the key points?", "Summary question")
-        ]
-    
-    results = {
-        "test_queries": len(test_queries),
-        "average_scores": {},
-        "detailed_results": []
-    }
-    
-    all_scores = {
-        "relevance": [],
-        "completeness": [],
-        "overall": []
-    }
-    
-    for query, description in test_queries:
+    for query in test_queries:
         try:
-            # Get response from the system
-            from main import query_llm
+            # Get response
             response = query_llm(vectorstore, query, evaluate_response=False)
             
-            # Extract just the answer part
-            answer_lines = response.split('\n')
+            # Parse response to extract answer
+            lines = response.split('\n')
             answer = ""
-            for line in answer_lines:
-                if line.startswith('📌 **Answer**:'):
-                    answer = line.replace('📌 **Answer**:', '').strip()
+            in_answer_section = False
+            
+            for line in lines:
+                line = line.strip()
+                if line.startswith('Answer:'):
+                    answer = line.replace('Answer:', '').strip()
+                    in_answer_section = True
+                elif in_answer_section and line and not line.startswith('Sources Used:') and not line.startswith('Response Quality:'):
+                    answer += " " + line
+                elif line.startswith('Sources Used:') or line.startswith('Response Quality:'):
                     break
-                elif not line.startswith('📎') and not line.startswith('📊'):
-                    answer += line + " "
             
-            # Evaluate the response
-            evaluation = evaluate_qa_response(query, answer.strip())
+            if not answer:
+                answer = response
             
-            # Store results
-            result_entry = {
-                "query": query,
-                "description": description,
-                "answer": answer.strip(),
-                "evaluation": evaluation
-            }
-            results["detailed_results"].append(result_entry)
+            # Evaluate response
+            evaluation = evaluate_qa_response(query, answer)
             
-            # Collect scores
-            if "relevance_score" in evaluation:
-                all_scores["relevance"].append(evaluation["relevance_score"])
-                all_scores["completeness"].append(evaluation["completeness_score"])
-                all_scores["overall"].append(evaluation["overall_score"])
-                
+            results.append({
+                'query': query,
+                'answer': answer,
+                'evaluation': evaluation
+            })
+            
         except Exception as e:
-            print(f"❌ Test query failed: {query} - {e}")
-    
-    # Calculate averages
-    for metric, scores in all_scores.items():
-        if scores:
-            results["average_scores"][metric] = round(sum(scores) / len(scores), 2)
+            print(f"Test query failed: {query} - {e}")
+            results.append({
+                'query': query,
+                'answer': f"Error: {str(e)}",
+                'evaluation': {'relevance_score': 0, 'completeness_score': 0, 'overall_score': 0}
+            })
     
     return results
 
-def save_evaluation_results(results: Dict, filename: str = None) -> str:
+def save_evaluation_results(results, filename="evaluation_results.json"):
     """
     Save evaluation results to a JSON file.
     """
-    if filename is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"evaluation_results_{timestamp}.json"
-    
     try:
         with open(filename, 'w') as f:
             json.dump(results, f, indent=2)
-        print(f"✅ Evaluation results saved to: {filename}")
-        return filename
+        print(f"Evaluation results saved to: {filename}")
     except Exception as e:
-        print(f"❌ Failed to save evaluation results: {e}")
-        return None
+        print(f"Failed to save evaluation results: {e}")
