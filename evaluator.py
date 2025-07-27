@@ -44,8 +44,8 @@ Respond ONLY with the number (0, 1, or 2).
 
 def evaluate_qa_response(query: str, answer: str, source_documents: List[str] = None) -> Dict:
     """
-    Comprehensive evaluation of QA response quality.
-    Returns detailed metrics for the response.
+    Simple evaluation of QA response quality with essential metrics.
+    Returns relevance, completeness, and overall score.
     """
     
     # 1. Relevance Score
@@ -84,27 +84,6 @@ Rate the completeness:
 Respond ONLY with the number (0-5).
 """
     
-    # 3. Source Relevance (if source documents provided)
-    source_score = None
-    if source_documents:
-        source_text = "\n".join(source_documents[:3])  # Use first 3 sources
-        source_prompt = f"""
-Evaluate how relevant the source documents are to the question.
-
-Question: {query}
-Source Documents: {source_text}
-
-Rate the source relevance:
-- 5 = Sources perfectly match the question
-- 4 = Sources are very relevant
-- 3 = Sources are somewhat relevant
-- 2 = Sources are barely relevant
-- 1 = Sources are not relevant
-- 0 = No sources provided
-
-Respond ONLY with the number (0-5).
-"""
-    
     try:
         # Get scores
         relevance_response = llm.invoke(relevance_prompt)
@@ -113,21 +92,12 @@ Respond ONLY with the number (0-5).
         completeness_response = llm.invoke(completeness_prompt)
         completeness_score = int(str(completeness_response.content).strip()[0])
         
-        if source_documents:
-            source_response = llm.invoke(source_prompt)
-            source_score = int(str(source_response.content).strip()[0])
-        
-        # Calculate overall score
-        scores = [relevance_score, completeness_score]
-        if source_score is not None:
-            scores.append(source_score)
-        
-        overall_score = sum(scores) / len(scores)
+        # Calculate overall score (simple average)
+        overall_score = (relevance_score + completeness_score) / 2
         
         return {
             "relevance_score": relevance_score,
             "completeness_score": completeness_score,
-            "source_relevance_score": source_score,
             "overall_score": round(overall_score, 2),
             "timestamp": datetime.now().isoformat(),
             "query": query,
@@ -135,7 +105,7 @@ Respond ONLY with the number (0-5).
         }
         
     except Exception as e:
-        print(f"❌ Comprehensive evaluation failed: {e}")
+        print(f"❌ Evaluation failed: {e}")
         return {
             "error": str(e),
             "timestamp": datetime.now().isoformat()
@@ -143,152 +113,97 @@ Respond ONLY with the number (0-5).
 
 def evaluate_retrieval_quality(query: str, retrieved_docs: List[str], expected_keywords: List[str] = None) -> Dict:
     """
-    Evaluate the quality of document retrieval for a query.
+    Simple evaluation of document retrieval quality.
     """
     
     if not retrieved_docs:
         return {
             "retrieval_score": 0,
-            "coverage_score": 0,
-            "diversity_score": 0,
-            "error": "No documents retrieved"
+            "documents_retrieved": 0,
+            "issues": ["No documents retrieved"]
         }
     
-    # Join retrieved documents
-    docs_text = "\n---\n".join(retrieved_docs[:5])  # Limit to first 5 docs
+    # Simple relevance evaluation
+    relevance_scores = []
+    for doc in retrieved_docs[:3]:  # Evaluate first 3 docs
+        score = evaluate_semantic_match(query, doc[:500])  # Use first 500 chars
+        if score >= 0:
+            relevance_scores.append(score)
     
-    # 1. Retrieval Relevance
-    retrieval_prompt = f"""
-Evaluate how relevant the retrieved documents are to the query.
+    avg_relevance = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0
+    retrieval_score = avg_relevance * 2.5  # Scale to 0-5
 
-Query: {query}
-Retrieved Documents: {docs_text}
-
-Rate the retrieval relevance:
-- 5 = All documents highly relevant
-- 4 = Most documents relevant
-- 3 = Some documents relevant
-- 2 = Few documents relevant
-- 1 = Most documents irrelevant
-- 0 = All documents irrelevant
-
-Respond ONLY with the number (0-5).
-"""
-    
-    # 2. Coverage Score
-    coverage_prompt = f"""
-Evaluate how well the retrieved documents cover the information needed for the query.
-
-Query: {query}
-Retrieved Documents: {docs_text}
-
-Rate the coverage:
-- 5 = Complete coverage of all aspects
-- 4 = Good coverage with minor gaps
-- 3 = Adequate coverage
-- 2 = Poor coverage with significant gaps
-- 1 = Very poor coverage
-- 0 = No relevant coverage
-
-Respond ONLY with the number (0-5).
-"""
-    
-    try:
-        retrieval_response = llm.invoke(retrieval_prompt)
-        retrieval_score = int(str(retrieval_response.content).strip()[0])
-        
-        coverage_response = llm.invoke(coverage_prompt)
-        coverage_score = int(str(coverage_response.content).strip()[0])
-        
-        # Calculate diversity (based on document count and content variety)
-        diversity_score = min(5, len(retrieved_docs) * 1.5)  # Simple heuristic
-        
-        return {
-            "retrieval_score": retrieval_score,
-            "coverage_score": coverage_score,
-            "diversity_score": round(diversity_score, 2),
-            "num_documents": len(retrieved_docs),
-            "timestamp": datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        print(f"❌ Retrieval evaluation failed: {e}")
-        return {
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
+    return {
+        "retrieval_score": round(retrieval_score, 2),
+        "documents_retrieved": len(retrieved_docs),
+        "issues": [] if retrieval_score >= 3 else ["Low relevance documents"]
+    }
 
 def run_evaluation_test_suite(vectorstore, test_queries: List[Tuple[str, str]] = None) -> Dict:
     """
-    Run a comprehensive evaluation test suite on your QA system.
-    
-    Args:
-        vectorstore: Your FAISS vectorstore
-        test_queries: List of (query, expected_answer) tuples for testing
+    Run a simple evaluation test suite on the QA system.
     """
     
     if test_queries is None:
-        # Default test queries for document QA
         test_queries = [
-            ("What is the main topic of the documents?", "General document content"),
-            ("Can you summarize the key points?", "Document summary"),
-            ("What are the important dates mentioned?", "Date information"),
-            ("Who are the main people mentioned?", "Person names"),
-            ("What are the main conclusions?", "Conclusions")
+            ("What is the main topic?", "General knowledge question"),
+            ("How does this work?", "Process explanation question"),
+            ("What are the key points?", "Summary question")
         ]
     
     results = {
-        "test_suite_results": [],
-        "overall_stats": {},
-        "timestamp": datetime.now().isoformat()
+        "test_queries": len(test_queries),
+        "average_scores": {},
+        "detailed_results": []
     }
     
-    total_scores = []
+    all_scores = {
+        "relevance": [],
+        "completeness": [],
+        "overall": []
+    }
     
-    for query, expected in test_queries:
+    for query, description in test_queries:
         try:
-            # Get response from your system
+            # Get response from the system
             from main import query_llm
-            response = query_llm(vectorstore, query)
+            response = query_llm(vectorstore, query, evaluate_response=False)
             
-            # Extract answer from response (remove sources)
-            if "📌 **Answer**:\n" in response:
-                answer = response.split("📌 **Answer**:\n")[1].split("\n\n📎 **Sources**:")[0]
-            else:
-                answer = response
+            # Extract just the answer part
+            answer_lines = response.split('\n')
+            answer = ""
+            for line in answer_lines:
+                if line.startswith('📌 **Answer**:'):
+                    answer = line.replace('📌 **Answer**:', '').strip()
+                    break
+                elif not line.startswith('📎') and not line.startswith('📊'):
+                    answer += line + " "
             
             # Evaluate the response
-            evaluation = evaluate_qa_response(query, answer)
+            evaluation = evaluate_qa_response(query, answer.strip())
             
-            test_result = {
+            # Store results
+            result_entry = {
                 "query": query,
-                "expected": expected,
-                "actual_answer": answer,
-                "evaluation": evaluation,
-                "response_length": len(answer)
+                "description": description,
+                "answer": answer.strip(),
+                "evaluation": evaluation
             }
+            results["detailed_results"].append(result_entry)
             
-            results["test_suite_results"].append(test_result)
-            
-            if "overall_score" in evaluation:
-                total_scores.append(evaluation["overall_score"])
+            # Collect scores
+            if "relevance_score" in evaluation:
+                all_scores["relevance"].append(evaluation["relevance_score"])
+                all_scores["completeness"].append(evaluation["completeness_score"])
+                all_scores["overall"].append(evaluation["overall_score"])
                 
         except Exception as e:
-            print(f"❌ Test failed for query '{query}': {e}")
-            results["test_suite_results"].append({
-                "query": query,
-                "error": str(e)
-            })
+            print(f"❌ Test query failed: {query} - {e}")
     
-    # Calculate overall statistics
-    if total_scores:
-        results["overall_stats"] = {
-            "average_score": round(sum(total_scores) / len(total_scores), 2),
-            "max_score": max(total_scores),
-            "min_score": min(total_scores),
-            "total_tests": len(total_scores),
-            "success_rate": round(len(total_scores) / len(test_queries) * 100, 2)
-        }
+    # Calculate averages
+    for metric, scores in all_scores.items():
+        if scores:
+            results["average_scores"][metric] = round(sum(scores) / len(scores), 2)
     
     return results
 
@@ -300,8 +215,11 @@ def save_evaluation_results(results: Dict, filename: str = None) -> str:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"evaluation_results_{timestamp}.json"
     
-    with open(filename, 'w') as f:
-        json.dump(results, f, indent=2)
-    
-    print(f"✅ Evaluation results saved to: {filename}")
-    return filename
+    try:
+        with open(filename, 'w') as f:
+            json.dump(results, f, indent=2)
+        print(f"✅ Evaluation results saved to: {filename}")
+        return filename
+    except Exception as e:
+        print(f"❌ Failed to save evaluation results: {e}")
+        return None

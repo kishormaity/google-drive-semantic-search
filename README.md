@@ -1,203 +1,263 @@
-# Claude Document QA Chatbot with Google Drive & Evaluation
+# Claude Document QA Chatbot
 
-This project is an interactive, multi-user Claude chatbot built using **Gradio**, **LangChain**, **Anthropic Claude**, **FAISS**, and **Google Drive integration** with **automatic response evaluation**. Users can authenticate, load their Drive documents, and query the content via Claude in a responsive chat interface with real-time quality assessment.
-
----
+A powerful document question-answering system using Claude AI and Google Drive integration with advanced accuracy optimization features, real-time streaming responses, and intelligent document filtering.
 
 ## Features
 
-- **Multi-user login system** (user ID/email-based)
-- **Google Drive integration** – load PDFs and text files from user Drive
-- **Claude Haiku** as backend LLM via `langchain_anthropic`
-- **Document QA system** with `FAISS` + HuggingFace Embeddings
-- **Responsive Gradio-based chatbot UI** with modern design
-- **Automatic Response Evaluation** – real-time quality scoring for every response
-- **Smart input handling** and minimal reloading for faster responses
-- **Stores FAISS index per user** (no need to recreate on every run)
-- **Mobile-responsive design** – works perfectly on all devices
+### 🤖 Core Functionality
+- **Google Drive Integration**: Automatically loads documents from your Google Drive
+- **Claude AI Powered**: Uses Anthropic's Claude models for intelligent responses
+- **Real-time Streaming**: Responses appear character-by-character like ChatGPT
+- **Vector Search**: FAISS-based semantic search for relevant document retrieval
+- **Response Evaluation**: Built-in quality assessment of AI responses
+- **Smart Document Filtering**: Only includes documents that actually mention the person/query
+- **Professional UI**: Beautiful loading screens and responsive design
 
----
+### ⚙️ Accuracy Optimization Settings
 
-## Response Evaluation System
+The web app includes comprehensive settings to optimize accuracy:
 
-The application includes an integrated evaluator that automatically assesses response quality:
+#### **Model Selection**
+- **Claude 3 Haiku**: Fast and efficient (default)
+- **Claude 3 Sonnet**: Balanced performance and accuracy
+- **Claude 3 Opus**: Highest accuracy but slower
 
-### **Evaluation Metrics:**
-- **Relevance Score (0-5)** - How well the answer matches the question
-- **Completeness Score (0-5)** - How thorough the answer is
-- **Overall Score (0-5)** - Average of relevance and completeness
+#### **Document Processing**
+- **Chunk Size**: Controls how documents are split (500-2000 tokens)
+  - Larger chunks = more context but may reduce precision
+  - Smaller chunks = more precise but may miss context
+- **Chunk Overlap**: Prevents information loss at boundaries (50-500 tokens)
+  - Higher overlap = better context preservation
+  - Lower overlap = more efficient processing
 
-### **Example Output:**
-```
-Response Quality:
-• Relevance: 4/5
-• Completeness: 3/5
-• Overall Score: 3.5/5
-```
+#### **Retrieval Settings**
+- **Retrieval Count**: Number of document chunks to retrieve (2-10)
+  - More chunks = broader context
+  - Fewer chunks = more focused responses
+- **Search Strategy**:
+  - `similarity`: Best semantic matches
+  - `mmr`: Maximum Marginal Relevance (diverse results)
+  - `similarity_score_threshold`: High confidence only
+- **Confidence Threshold**: Minimum similarity score (0.0-1.0)
+  - Higher threshold = more relevant documents
+  - Lower threshold = more comprehensive search
 
----
+#### **Response Generation**
+- **Temperature**: Controls response creativity (0.0-1.0)
+  - Lower values = more focused and consistent
+  - Higher values = more creative and varied
+- **Prompt Template**:
+  - `default`: Standard QA format
+  - `detailed`: Comprehensive explanations
+  - `concise`: Brief, to-the-point answers
+  - `academic`: Scholarly, well-referenced responses
+- **Max Context Length**: Maximum tokens for context (2000-8000)
+  - Larger context = more information available
+  - Smaller context = faster processing
 
-## Setup Instructions
+#### **Quality Assessment**
+- **Response Evaluation**: Toggle quality scoring on/off
+  - Relevance score (0-5)
+  - Completeness score (0-5)
+  - Overall quality score
 
-### 1. Clone the repository
+### 🚀 Advanced Features
 
-```bash
-git clone https://github.com/kishormaity/google-drive-semantic-search.git
-cd google-drive-semantic-search
-```
+#### **Smart Document Filtering**
+When you ask about a specific person (e.g., "tell me about John"), the system:
+- **Only retrieves documents** that actually contain "John"
+- **Excludes irrelevant documents** automatically
+- **Shows debug information** about which documents are included/excluded
+- **Prevents information from wrong people** being mixed in
 
-### 2. Install dependencies
+#### **Real-time Streaming**
+- **Immediate response start** - no waiting for complete generation
+- **Character-by-character display** - natural typing effect
+- **Professional experience** - like ChatGPT and modern AI assistants
+- **Better user engagement** - users see progress in real-time
 
-Make sure you are using Python 3.9+ and create a virtual environment:
+#### **Enhanced User Experience**
+- **Loading screens** - professional initialization experience
+- **Responsive design** - works on all devices
+- **Clean chat interface** - modern, intuitive design
+- **Stable indicators** - no flickering or changing text
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-pip install -r requirements.txt
-```
+## Usage
 
-### 3. Setup Environment Variables
-
-#### a. Create a `.env` file:
-
-```bash
-cp .env.example .env
-```
-
-Add your **Anthropic API key** to `.env`:
-
-```
-ANTHROPIC_API_KEY=your_anthropic_api_key
-```
-
-#### b. Add `credentials.json`
-
-This is your **Google OAuth Client ID** JSON downloaded from [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
-
-### 4. Run the app
-
+1. **Start the Application**:
 ```bash
 python web_app.py
 ```
 
-Open the Gradio interface in your browser and start chatting with Claude!
+2. **Initial Loading**: Wait for the beautiful loading screen to complete initialization
 
----
+3. **Login**: Enter your email ID to authenticate with Google Drive
 
-## Responsive Design
+4. **Ask Questions**: The system will:
+   - Show a stable loading indicator while processing
+   - Stream responses character-by-character in real-time
+   - Only use documents that actually mention the person/query
+   - Provide clean, deduplicated sources
 
-The application features a fully responsive design that works on all devices:
+## Enhanced Features
 
-- **Desktop** - Full layout with side-by-side input/button
-- **Tablet** - Optimized spacing and sizing
-- **Mobile** - Stacked layout with touch-friendly controls
-- **Small Mobile** - Compact design for very small screens
+### **Smart Document Filtering**
+When you ask about a specific person (e.g., "tell me about John"), the system:
+- **Only retrieves documents** that actually contain "John"
+- **Excludes irrelevant documents** automatically
+- **Shows debug information** about which documents are included/excluded
+- **Prevents information from wrong people** being mixed in
 
-### **Key Responsive Features:**
-- Adaptive chatbot heights for different screen sizes
-- Touch-friendly input and buttons
-- Proper viewport handling
-- iOS compatibility (prevents zoom on input)
-- Clean, modern UI with minimal styling
+### **Real-time Streaming**
+- **Immediate response start** - no waiting for complete generation
+- **Character-by-character display** - natural typing effect
+- **Professional experience** - like ChatGPT and modern AI assistants
+- **Better user engagement** - users see progress in real-time
 
----
+### **Improved UI/UX**
+- **Loading screens** - professional initialization experience
+- **Responsive design** - works on all devices
+- **Clean chat interface** - modern, intuitive design
+- **Stable indicators** - no flickering or changing text
 
-## Project Structure
+## Accuracy Tips
 
+### For Technical Documents
+- Use **academic** prompt template
+- Set **chunk size** to 1500-2000
+- Use **similarity_score_threshold** with 0.8+ confidence
+- Enable **evaluation** for quality feedback
+
+### For General Documents
+- Use **detailed** prompt template
+- Set **chunk size** to 1000-1500
+- Use **mmr** search strategy for diverse results
+- Set **temperature** to 0.1-0.3 for consistency
+
+### For Quick Queries
+- Use **concise** prompt template
+- Set **chunk size** to 500-1000
+- Use **similarity** search strategy
+- Set **retrieval count** to 2-4
+
+## Installation
+
+1. Install dependencies:
+```bash
+pip install -r requirements.txt
 ```
-PythonProject/
-├── web_app.py              # Responsive Gradio UI + session logic
-├── main.py                 # Drive loader, vectorstore, query logic
-├── evaluator.py            # Response quality evaluation system
-├── requirements.txt        # Essential dependencies only
-├── README.md              # This file
-├── .env                   # Your secrets (never commit this)
-├── credentials.json       # Google OAuth credentials
-├── tokens/                # User authentication tokens
-├── user_data/             # Per-user FAISS indexes
-└── vectorstores/          # Vector database storage
-```
 
----
-
-## How It Works
-
-1. **User Authentication**: Enter email ID to log in
-2. **Document Loading**: Automatically loads documents from Google Drive
-3. **Vector Indexing**: Creates FAISS index for semantic search
-4. **Query Processing**: Uses Claude to answer questions about documents
-5. **Quality Evaluation**: Automatically evaluates response quality
-6. **Responsive Display**: Shows results in clean, mobile-friendly interface
-
----
-
-## Evaluation System Details
-
-The evaluator uses Claude Haiku to assess response quality:
-
-### **Evaluation Process:**
-1. **Query Analysis** - Understands the user's question
-2. **Response Assessment** - Evaluates relevance and completeness
-3. **Scoring** - Provides detailed quality metrics
-4. **Display** - Shows scores in the chat interface
-
-### **Benefits:**
-- **Real-time feedback** on response quality
-- **Continuous improvement** insights
-- **Quality assurance** for document QA
-- **Performance monitoring** over time
-
----
-
-## Environment Variables (.env)
-
-Required environment variables:
-
-```env
+2. Set up environment variables:
+```bash
 ANTHROPIC_API_KEY=your_claude_api_key
 ```
 
-Google OAuth credentials format:
+3. Configure Google Drive credentials:
+   - Place `credentials.json` in the project root
+   - Follow Google Drive API setup instructions
 
-```json
-{
-  "installed": {
-    "client_id": "your_client_id_here",
-    "project_id": "your_project_id_here",
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_secret": "your_client_secret_here",
-    "redirect_uris": ["http://localhost"]
-  }
+## File Structure
+
+```
+PythonProject/
+├── web_app.py          # Main web application with streaming UI
+├── main.py             # Core QA functionality with enhanced filtering
+├── evaluator.py        # Response quality evaluation
+├── requirements.txt    # Python dependencies
+├── credentials.json    # Google Drive API credentials
+├── tokens/             # OAuth tokens (auto-generated)
+├── user_data/          # User-specific data and indexes
+└── vectorstores/       # FAISS vector databases
+```
+
+## Data Flow Diagram (DFD)
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   User Input    │───▶│  Gradio Web UI   │───▶│  Authentication │
+│   (Question)    │    │   (web_app.py)   │    │   (Google OAuth)│
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  Streaming      │◀───│  Query Processing│◀───│  Google Drive   │
+│  Response       │    │   (main.py)      │    │   Documents     │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                │
+                                ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  Response       │◀───│  Claude AI       │◀───│  Document       │
+│  Evaluation     │    │  (Anthropic)     │    │  Retrieval      │
+│  (evaluator.py) │    │                  │    │  (FAISS)        │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                │
+                                ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  User Output    │◀───│  Real-time       │◀───│  Quality        │
+│  (Streaming)    │    │  Streaming       │    │  Assessment     │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+```
+
+### **Data Flow Steps:**
+
+1. **User Input** → User types question in Gradio interface
+2. **Authentication** → Google OAuth validates user and loads documents
+3. **Document Retrieval** → FAISS vector search finds relevant documents
+4. **Smart Filtering** → Only documents mentioning the person/query are selected
+5. **Query Processing** → Documents are processed and context is prepared
+6. **Claude AI** → Anthropic's Claude generates response
+7. **Real-time Streaming** → Response streams character-by-character
+8. **Quality Evaluation** → Response is evaluated for relevance and completeness
+9. **User Output** → Final response with sources and evaluation displayed
+
+### **Key Components:**
+
+- **Gradio UI**: Modern web interface with streaming capabilities
+- **Google Drive API**: Secure document access and authentication
+- **FAISS Vector DB**: Fast semantic search and document retrieval
+- **Claude AI**: Intelligent response generation with streaming
+- **Evaluation System**: Quality assessment and feedback
+- **Smart Filtering**: Ensures only relevant documents are used
+
+## Advanced Configuration
+
+### Custom Prompt Templates
+You can modify the prompt templates in `main.py` to suit your specific use case:
+
+```python
+prompt_templates = {
+    "custom": """Your custom prompt template here.
+    
+    Context: {context}
+    Question: {question}
+    
+    Answer:"""
 }
 ```
 
----
+### Embedding Models
+The system uses `sentence-transformers/all-MiniLM-L6-v2` for embeddings. You can change this in `main.py`:
 
-## Usage
+```python
+embeddings = HuggingFaceEmbeddings(model_name="your-preferred-model")
+```
 
-1. **Start the application**: `python web_app.py`
-2. **Access the UI**: Open http://127.0.0.1:7860
-3. **Login**: Enter your email ID
-4. **Ask questions**: Type questions about your documents
-5. **View evaluation**: See quality scores for each response
-6. **Enjoy**: Clean, responsive interface with automatic evaluation
+## Troubleshooting
 
----
+### Common Issues
+1. **Low accuracy**: Try increasing chunk size, retrieval count, or switching to a more powerful model
+2. **Slow responses**: Reduce chunk size, retrieval count, or use Claude 3 Haiku
+3. **Irrelevant results**: The enhanced filtering should prevent this - check debug logs
+4. **Missing context**: Increase chunk overlap or retrieval count
+5. **Streaming not working**: Ensure you have the latest Gradio version
+
+### Performance Optimization
+- Use appropriate chunk sizes for your document types
+- Balance retrieval count with response quality
+- Consider document preprocessing for better chunking
+- Monitor evaluation scores to tune settings
+- The enhanced filtering reduces noise automatically
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
----
-
-## License
-
-MIT License. Free to use, modify, and distribute.
-
----
-
-## Author
-
-Built by [Kishor](https://github.com/kishormaity). Contributions welcome!
+Feel free to submit issues and enhancement requests!
